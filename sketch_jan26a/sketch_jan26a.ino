@@ -10,7 +10,6 @@
 #include "Zanshin_BME680.h"
 #define HASBME
 
-
 #define DAC0_PIN      DAC0 
 #define DAC1_PIN      DAC1
 byte PELT_CMD_PIN =   DAC1;
@@ -68,7 +67,6 @@ Adafruit_MCP4725 dac1, dac2;
 //Getting single-ended readings from AIN0..3
 //ADC Range: +/- 6.144V (1 bit =  0.1875mV)
 
-
 byte TempControlOption = DS18;
 byte HeaterOption = RESISTOR;
 byte MFCControlOption = BUILTIN_ADC_DAC;
@@ -96,8 +94,9 @@ byte          active_ch           = 0;
 long          dio                 = 0;
 byte          package_number      = 0;
 bool          ledState            = false;
-bool          debug = false;      //if true, debug output to serial console enabled
-
+bool          useNativeUSB        = true;
+bool          debug = true && useNativeUSB; //if true, debug output to serial console enabled
+                                            //debug can be true only if the main stream goes to NativeUSB
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
@@ -106,7 +105,13 @@ void setup() {
   {
     ;
   }
+  SerialUSB.begin(9600); //argument value has no sense, the datarate used is the maximum datarate supported by two devices
+  while(!SerialUSB)
+  {
+    ;
+  }
   if (debug) Serial.print("Program started\n");
+  if (debug) Serial.print("NativeUSB initialized\n");
   for (int i = 0; i < 6; i++)
   {
     pinMode(DIO_channels[i], OUTPUT);
@@ -274,9 +279,12 @@ void reply()
   {
     sprintf(tmp, "%02X %02X %02X %04X %04X %08X %02X %s", package_number, dac_values[0], dac_values[1],
             analogRead(ADC_channels[0]), analogRead(ADC_channels[1]), porta, pelt_cmd, temp_humidity_string);
-  }
-  
-  if(!debug) Serial.println(tmp);
+  } 
+  //if(!debug) Serial.println(tmp);
+  if(useNativeUSB) 
+    SerialUSB.println(tmp);
+  else
+    Serial.println(tmp);
 }
 
 void loop() {
@@ -287,17 +295,34 @@ void loop() {
     ticks = 0;
   }
   ticks++;
-
-  if (Serial.available() > 0)
+  int bytesAvailable = 0;
+  if (useNativeUSB)
   {
-    byte b = Serial.read();
+    bytesAvailable = SerialUSB.available();
+  }
+  else
+  {
+    bytesAvailable = Serial.available();
+  }
+  if (bytesAvailable > 0)
+  {
+    byte b = 0;
+    if (useNativeUSB)
+    {
+      b = SerialUSB.read();
+    }
+    else
+    {
+      b = Serial.read();
+    }
     if (b == '$') //$ starts the package
     {
       comState = WAITING_COMMAND;
       digitalWrite(LED_BUILTIN, HIGH);
       return;
     }
-
+    int pelt_cmd = 0;
+    int set_temperature = 0;
     if (comState == WAITING_COMMAND)
     {
       switch (b)
@@ -310,7 +335,15 @@ void loop() {
 
         case 'c':   //next few digits are duty rate to set on PWM
           command   = SET_DUTYRATE;
-          pelt_cmd  = Serial.parseInt(SKIP_ALL);
+          
+          if (useNativeUSB)
+          {
+            pelt_cmd  = SerialUSB.parseInt(SKIP_ALL);
+          }
+          else
+          {
+            pelt_cmd  = Serial.parseInt(SKIP_ALL);
+          }
           comState  = READY_TO_EXECUTE;
           break;
 
@@ -328,7 +361,14 @@ void loop() {
 
         case 't':   //next few digits is integer representing temperature of perltier
           command     = SET_TEMP;
-          set_temperature = Serial.parseInt(SKIP_ALL);//*10;
+          
+          if (useNativeUSB)
+          {
+            set_temperature = SerialUSB.parseInt(SKIP_ALL);//*10;
+          }
+          else{
+            set_temperature = Serial.parseInt(SKIP_ALL);//*10;
+          }
           comState    = READY_TO_EXECUTE;
           /*if(set_temperature!=0)
           {
@@ -364,7 +404,10 @@ void loop() {
       comState  = READY_TO_EXECUTE;
       if (command == SET_VOLTAGE)
       {
-        dac_values[active_ch] = Serial.parseInt(SKIP_ALL);
+        if(useNativeUSB)
+          dac_values[active_ch] = SerialUSB.parseInt(SKIP_ALL);
+        else
+          dac_values[active_ch] = Serial.parseInt(SKIP_ALL);
       }
       return;
     }
